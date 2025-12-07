@@ -1,42 +1,40 @@
-# This file is for root deployment (monorepo)
-# Move this to frontend/Dockerfile or use docker-compose.yml instead
-
+# Frontend Deployment (Next.js Static Export)
 # Build stage
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install pnpm
+RUN npm install -g pnpm
+
 # Copy package files
-COPY frontend/package*.json ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 # Copy source code
-COPY frontend . 
+COPY frontend/. .
 
-# Build Next.js
-RUN npm run build
+# Build Next.js static export
+RUN pnpm run build
 
-# Production stage
-FROM node:20-alpine
+# Production stage - Nginx for static hosting
+FROM nginx:alpine
 
-WORKDIR /app
+WORKDIR /usr/share/nginx/html
 
-# Copy package files
-COPY frontend/package*.json ./
+# Remove default nginx files
+RUN rm -rf ./*
 
-# Install only production dependencies
-RUN npm ci --only=production
+# Copy built static files
+COPY --from=builder /app/out ./
 
-# Copy built app from builder
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/node_modules ./node_modules
+# Copy nginx config
+COPY frontend/nginx.conf /etc/nginx/nginx.conf
 
 # Expose port
-EXPOSE 3000
+EXPOSE 80
 
-# Start app
-ENV NEXT_PUBLIC_API_URL=http://backend:5000
-CMD ["npm", "start"]
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]
