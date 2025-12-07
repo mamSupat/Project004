@@ -1,18 +1,4 @@
-# Build stage
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY . .
-
-# Production stage
+# Use Node.js LTS Alpine
 FROM node:20-alpine
 
 WORKDIR /app
@@ -20,13 +6,17 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm ci --only=production
+# Install dependencies (postinstall will run prisma generate)
+RUN npm install --omit=dev
 
-# Copy app from builder
-COPY --from=builder /app . 
+# Copy Prisma schema
+COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
-# Expose port
+# Copy application code
+COPY server.js ./
+
+# Expose port (Railway will override this)
 EXPOSE 5000
 
 # Start server
