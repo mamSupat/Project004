@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  deviceId   String   @unique
+  name       String
+  type       String
+  status     String   @default("off")
+  location   String?
+  value      Float?
+  unit       String?
+  lastUpdate DateTime @default(now()) @updatedAt
+  createdAt  DateTime @default(now())
+
+  @@map("devices")
+}
+
+model SensorData {
+  id        String   @id @default(cuid())
+  sensorId  String
+  value     Float
+  unit      String
+  timestamp DateTime @default(now())
+
+  @@index([sensorId])
+  @@map("sensor_data")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  type      String
+  recipient String
+  subject   String?
+  message   String
+  status    String    @default("pending")
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("notifications")
+}

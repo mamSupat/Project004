@@ -298,8 +298,8 @@ app.use((req, res) => {
 });
 
 // ==================== Start Server ====================
-app.listen(PORT, () => {
-  console.log(`🚀 Backend API running at http://localhost:${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Backend API running on port ${PORT}`);
+  console.log(`📊 Health check: /health`);
   console.log(`🔌 CORS enabled for frontend requests`);
 });
