@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface User {
   userId: string;
@@ -14,9 +15,9 @@ interface AuthContextType {
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<void>;
-  logout: () => void;
   isLoading: boolean;
   error: string | null;
+  isLoggedIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,12 +25,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-  // ไม่เช็ค auth เมื่อเริ่มแอป - ให้ user เข้าได้ถึงทุกหน้า
+  // เช็ค auth เมื่อเริ่มแอป - redirect ไป dashboard ถ้ามี token
   useEffect(() => {
     const savedToken = localStorage.getItem('auth_token');
     const savedUser = localStorage.getItem('auth_user');
@@ -37,9 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+      // redirect ไป dashboard
+      router.push('/dashboard');
+    } else {
+      // ยังไม่ login - redirect ไป home
+      router.push('/');
     }
     setIsLoading(false);
-  }, []);
+  }, [router]);
 
   const login = async (email: string, password: string) => {
     setError(null);
@@ -62,6 +69,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
+      // redirect ไป dashboard หลัง login สำเร็จ
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
       throw err;
@@ -91,6 +100,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
+      // redirect ไป dashboard หลัง register สำเร็จ
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
       throw err;
@@ -99,16 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    setError(null);
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
-  };
-
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading, error }}>
+    <AuthContext.Provider value={{ user, token, login, register, isLoading, error, isLoggedIn: !!token }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,26 +1,19 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LogOut, Menu, X, Book } from "lucide-react"
-import { getCurrentUser, logout } from "@/lib/auth"
+import { Menu, X, Book } from "lucide-react"
+import { getCurrentUser } from "@/lib/auth"
 import Link from "next/link"
 import type { User } from "@/types"
 
 export function Navbar() {
   const [user, setUser] = useState<User | null>(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const router = useRouter()
 
   useEffect(() => {
     setUser(getCurrentUser())
   }, [])
-
-  const handleLogout = () => {
-    logout()
-    router.push("/")
-  }
 
   if (!user) return null
 
@@ -95,18 +88,6 @@ export function Navbar() {
                 Docs
               </Button>
             </Link>
-
-            <div className="h-6 w-px bg-white/30 mx-2" />
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLogout}
-              className="text-white hover:bg-white/20 flex items-center gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -194,5 +175,3 @@ export function Navbar() {
         )}
       </div>
     </nav>
-  )
-}
