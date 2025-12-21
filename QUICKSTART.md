@@ -100,8 +100,8 @@ heroku create iot-backend
 git push heroku main
 ```
 
-**Option D: Railway.app**
-- Connect GitHub → select `/backend` folder → Deploy
+**Option D: DigitalOcean App Platform**
+- Connect GitHub → Deploy `/backend` folder
 
 ### Step 4: Update Frontend .env.production
 ```

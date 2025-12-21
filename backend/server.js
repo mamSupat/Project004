@@ -1,8 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import * as dynamoService from './services/dynamodb.service.js';
+import { SensorService } from './services/sensor.service.js';
+import { DeviceService } from './services/device.service.js';
 
 dotenv.config();
+
+// Initialize DynamoDB Services
+const sensorService = new SensorService();
+const deviceService = new DeviceService();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -289,6 +296,327 @@ app.post('/api/notifications/email', (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to send email" });
+  }
+});
+
+// ==================== DYNAMODB API ====================
+
+// GET: Sensor Data by DeviceId
+app.get('/api/dynamodb/sensor/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const limit = parseInt(req.query.limit) || 20;
+    
+    const data = await dynamoService.getSensorData(deviceId, limit);
+    res.json({
+      success: true,
+      deviceId,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching sensor data:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch sensor data',
+      message: error.message,
+    });
+  }
+});
+
+// GET: Device Status
+app.get('/api/dynamodb/device/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const device = await dynamoService.getDeviceStatus(deviceId);
+    
+    if (!device) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Device not found' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      device,
+    });
+  } catch (error) {
+    console.error('Error fetching device status:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch device status',
+      message: error.message,
+    });
+  }
+});
+
+// POST: Save Sensor Data
+app.post('/api/dynamodb/sensor', async (req, res) => {
+  try {
+    const sensorData = req.body;
+    
+    if (!sensorData.deviceId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'deviceId is required' 
+      });
+    }
+    
+    const result = await dynamoService.saveSensorData(sensorData);
+    res.json(result);
+  } catch (error) {
+    console.error('Error saving sensor data:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to save sensor data',
+      message: error.message,
+    });
+  }
+});
+
+// PUT: Update Device Status
+app.put('/api/dynamodb/device/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'status is required' 
+      });
+    }
+    
+    const result = await dynamoService.updateDeviceStatus(deviceId, status);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating device status:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to update device status',
+      message: error.message,
+    });
+  }
+});
+
+// GET: All Devices Status
+app.get('/api/dynamodb/devices', async (req, res) => {
+  try {
+    const devices = await dynamoService.getAllDevicesStatus();
+    res.json({
+      success: true,
+      count: devices.length,
+      devices,
+    });
+  } catch (error) {
+    console.error('Error fetching all devices:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch devices',
+      message: error.message,
+    });
+  }
+});
+
+// ==================== DynamoDB API (New Routes) ====================
+
+// GET: ข้อมูล Sensor ตาม deviceId
+app.get('/api/sensor/data', async (req, res) => {
+  try {
+    const { deviceId, limit } = req.query;
+    
+    if (!deviceId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'deviceId is required' 
+      });
+    }
+
+    const data = await sensorService.getSensorData(deviceId, parseInt(limit) || 20);
+    
+    res.json({
+      success: true,
+      deviceId: deviceId,
+      count: data.length,
+      data: data,
+    });
+  } catch (error) {
+    console.error('[API Error] getSensorData:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch sensor data',
+      message: error.message,
+    });
+  }
+});
+
+// GET: ข้อมูล Sensor ทั้งหมด
+app.get('/api/sensor/all', async (req, res) => {
+  try {
+    const { limit } = req.query;
+    const data = await sensorService.getAllSensorData(parseInt(limit) || 50);
+    
+    res.json({
+      success: true,
+      count: data.length,
+      data: data,
+    });
+  } catch (error) {
+    console.error('[API Error] getAllSensorData:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch all sensor data',
+      message: error.message,
+    });
+  }
+});
+
+// GET: ข้อมูล Sensor ตามช่วงเวลา
+app.get('/api/sensor/timerange', async (req, res) => {
+  try {
+    const { deviceId, startTime, endTime } = req.query;
+    
+    if (!deviceId || !startTime || !endTime) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'deviceId, startTime, and endTime are required' 
+      });
+    }
+
+    const data = await sensorService.getSensorDataByTimeRange(
+      deviceId, 
+      parseInt(startTime), 
+      parseInt(endTime)
+    );
+    
+    res.json({
+      success: true,
+      deviceId: deviceId,
+      count: data.length,
+      data: data,
+    });
+  } catch (error) {
+    console.error('[API Error] getSensorDataByTimeRange:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch sensor data by time range',
+      message: error.message,
+    });
+  }
+});
+
+// GET: สถานะอุปกรณ์ตาม deviceId
+app.get('/api/device/status/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const device = await deviceService.getDeviceStatus(deviceId);
+    
+    if (!device) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Device not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      device: device,
+    });
+  } catch (error) {
+    console.error('[API Error] getDeviceStatus:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch device status',
+      message: error.message,
+    });
+  }
+});
+
+// GET: สถานะอุปกรณ์ทั้งหมด
+app.get('/api/device/all', async (req, res) => {
+  try {
+    const devices = await deviceService.getAllDevices();
+    
+    res.json({
+      success: true,
+      count: devices.length,
+      devices: devices,
+    });
+  } catch (error) {
+    console.error('[API Error] getAllDevices:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch all devices',
+      message: error.message,
+    });
+  }
+});
+
+// POST: อัปเดตสถานะอุปกรณ์
+app.post('/api/device/update', async (req, res) => {
+  try {
+    const { deviceId, status, data } = req.body;
+    
+    if (!deviceId || !status) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'deviceId and status are required' 
+      });
+    }
+
+    const updatedDevice = await deviceService.updateDeviceStatus(
+      deviceId, 
+      status, 
+      data || {}
+    );
+    
+    res.json({
+      success: true,
+      message: 'Device status updated',
+      device: updatedDevice,
+    });
+  } catch (error) {
+    console.error('[API Error] updateDeviceStatus:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to update device status',
+      message: error.message,
+    });
+  }
+});
+
+// POST: สร้างอุปกรณ์ใหม่
+app.post('/api/device/create', async (req, res) => {
+  try {
+    const { deviceId, name, type, location } = req.body;
+    
+    if (!deviceId || !name || !type) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'deviceId, name, and type are required' 
+      });
+    }
+
+    const newDevice = await deviceService.createDevice(
+      deviceId, 
+      name, 
+      type, 
+      location
+    );
+    
+    res.status(201).json({
+      success: true,
+      message: 'Device created successfully',
+      device: newDevice,
+    });
+  } catch (error) {
+    console.error('[API Error] createDevice:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to create device',
+      message: error.message,
+    });
   }
 });
 

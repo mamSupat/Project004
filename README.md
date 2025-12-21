@@ -113,8 +113,8 @@ Choose one:
 - AWS Lambda
 - AWS EC2
 - Heroku
-- Railway.app
 - DigitalOcean
+- Azure App Service
 
 ## 🐳 Docker
 

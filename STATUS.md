@@ -163,7 +163,7 @@ npm run build
 | **AWS Lambda** | $$ | 20 min | Scalable, pay-per-use |
 | **EC2** | $$$ | 30 min | Full control |
 | **Heroku** | $$ | 5 min | Simple, fast |
-| **Railway.app** | $ | 5 min | Free tier available |
+| **DigitalOcean** | $ | 10 min | Easy, affordable |
 
 ### Step 3: Update `.env.production`
 ```

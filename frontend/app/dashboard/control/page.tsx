@@ -6,345 +6,309 @@ import { getCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import type { DeviceStatus } from "@/types"
-import { Lightbulb, Power, Fan, Droplets, Zap, Clock, Activity } from "lucide-react"
+import { Power, AlertCircle, CheckCircle2, Zap, Wifi } from "lucide-react"
+
+interface RelayState {
+  relay1: 'on' | 'off'
+  relay2: 'on' | 'off'
+  lastUpdate: string
+}
 
 export default function ControlPage() {
-  const [devices, setDevices] = useState<DeviceStatus[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fanSpeed, setFanSpeed] = useState(0)
-  const [autoMode, setAutoMode] = useState(false)
+  const [relayState, setRelayState] = useState<RelayState>({
+    relay1: 'off',
+    relay2: 'off',
+    lastUpdate: new Date().toISOString(),
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [connected, setConnected] = useState(false)
   const router = useRouter()
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
   useEffect(() => {
     const user = getCurrentUser()
     if (!user) {
-      router.push("/")
+      router.push('/')
       return
     }
 
-    fetchDevices()
+    fetchRelayState()
+    // Poll relay state every 2 seconds
+    const interval = setInterval(fetchRelayState, 2000)
+    return () => clearInterval(interval)
   }, [router])
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-
-  const fetchDevices = async () => {
+  const fetchRelayState = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/devices`)
-      const data = await response.json()
-      setDevices(data)
-    } catch (error) {
-      console.error("Failed to fetch devices:", error)
+      const response = await fetch(`${API_URL}/api/relay/state`)
+      if (response.ok) {
+        const data = await response.json()
+        setRelayState(data)
+        setConnected(true)
+        setError('')
+      } else {
+        setConnected(false)
+        setError('Failed to fetch relay state')
+      }
+    } catch (err) {
+      setConnected(false)
+      console.error('Error fetching relay state:', err)
+    }
+  }
+
+  const updateRelay = async (relay: 'relay1' | 'relay2', value: 'on' | 'off') => {
+    setLoading(true)
+    setError('')
+
+    try {
+      const payload = {
+        [relay]: value,
+      }
+
+      const response = await fetch(`${API_URL}/api/relay/state`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setRelayState(data.state)
+        console.log(`[Control] ${relay} set to ${value}`)
+      } else {
+        setError('Failed to update relay')
+      }
+    } catch (err) {
+      setError('Error updating relay: ' + String(err))
+      console.error('Error updating relay:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  const toggleDevice = async (deviceId: string, currentStatus: string) => {
-    const newStatus = currentStatus === "on" ? "off" : "on"
-
-    try {
-      const response = await fetch(`${API_URL}/api/devices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId, status: newStatus }),
-      })
-
-      if (response.ok) {
-        setDevices(
-          devices.map((d) =>
-            d.deviceId === deviceId ? { ...d, status: newStatus, lastUpdate: new Date().toISOString() } : d,
-          ),
-        )
-      }
-    } catch (error) {
-      console.error("Failed to toggle device:", error)
-    }
-  }
-
-  const toggleAllDevices = async (status: "on" | "off") => {
-    for (const device of devices.filter((d) => d.type === "light")) {
-      await toggleDevice(device.deviceId, device.status === status ? "off" : "on")
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 dark:from-gray-950 dark:via-blue-950 dark:to-gray-900">
-        <div className="flex items-center justify-center h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
-        </div>
-      </div>
-    )
+  const toggleRelay = (relay: 'relay1' | 'relay2') => {
+    const newState = relayState[relay] === 'on' ? 'off' : 'on'
+    updateRelay(relay, newState)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 dark:from-gray-950 dark:via-blue-950 dark:to-gray-900">
-
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-blue-100">
       <main className="container mx-auto px-4 py-8">
         <div className="space-y-6">
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                ควบคุมอุปกรณ์
+              <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Relay Control
               </h1>
-              <p className="text-muted-foreground mt-2">Device Control & Management System</p>
+              <p className="text-muted-foreground mt-2">
+                Control 2-channel relay connected to ESP32
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={() => toggleAllDevices("on")} className="bg-gradient-to-r from-green-600 to-emerald-600">
-                <Zap className="h-4 w-4 mr-2" />
-                เปิดทั้งหมด
-              </Button>
-              <Button onClick={() => toggleAllDevices("off")} variant="outline">
-                <Power className="h-4 w-4 mr-2" />
-                ปิดทั้งหมด
-              </Button>
+            <div className="flex items-center gap-3">
+              {connected ? (
+                <>
+                  <Wifi className="h-5 w-5 text-green-600 animate-pulse" />
+                  <Badge className="bg-green-600">Connected</Badge>
+                </>
+              ) : (
+                <>
+                  <Wifi className="h-5 w-5 text-red-600" />
+                  <Badge variant="destructive">Disconnected</Badge>
+                </>
+              )}
             </div>
           </div>
 
-          {/* System Status */}
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Activity className="h-4 w-4" />
-                  อุปกรณ์ทั้งหมด
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-blue-600">{devices.length}</div>
-              </CardContent>
-            </Card>
+          {/* Error Alert */}
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-700">{error}</div>
+            </div>
+          )}
 
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-green-500" />
-                  ทำงานอยู่
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-green-600">
-                  {devices.filter((d) => d.status === "on").length}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Power className="h-4 w-4 text-gray-500" />
-                  ปิดอยู่
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-gray-600">
-                  {devices.filter((d) => d.status === "off").length}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-blue-500" />
-                  โหมดอัตโนมัติ
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Badge variant={autoMode ? "default" : "secondary"} className="text-base px-3 py-1">
-                  {autoMode ? "เปิด" : "ปิด"}
-                </Badge>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Auto Mode Control */}
-          <Card className="border-2 border-blue-300 dark:border-blue-700">
+          {/* Connection Status */}
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-blue-600" />
-                การควบคุมอัตโนมัติ
+                <Zap className="h-5 w-5 text-yellow-600" />
+                System Status
               </CardTitle>
-              <CardDescription>ตั้งค่าเวลาเปิด-ปิดไฟอัตโนมัติตามเวลา</CardDescription>
+              <CardDescription>Backend API and relay module connection</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                <div>
-                  <Label className="text-base font-medium">เปิดใช้งานโหมดอัตโนมัติ</Label>
-                  <p className="text-sm text-muted-foreground">เปิดไฟตอนมืด (18:00) ปิดไฟตอนเช้า (06:00)</p>
+            <CardContent className="space-y-3">
+              <div className="grid gap-2 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Backend API:</span>
+                  <Badge variant={connected ? 'default' : 'destructive'}>
+                    {connected ? '✅ Online' : '❌ Offline'}
+                  </Badge>
                 </div>
-                <Switch checked={autoMode} onCheckedChange={setAutoMode} />
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="p-4 border-2 border-dashed border-blue-300 dark:border-blue-700 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Lightbulb className="h-4 w-4 text-yellow-500" />
-                    <span className="font-medium">เปิดไฟ (Evening)</span>
-                  </div>
-                  <p className="text-2xl font-bold text-blue-600">18:00 - 20:00</p>
-                  <p className="text-xs text-muted-foreground mt-1">เมื่อความเข้มแสง {"<"} 1000 Lux</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Relay Module:</span>
+                  <Badge variant="default">Active</Badge>
                 </div>
-
-                <div className="p-4 border-2 border-dashed border-blue-300 dark:border-blue-700 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Power className="h-4 w-4 text-gray-500" />
-                    <span className="font-medium">ปิดไฟ (Morning)</span>
-                  </div>
-                  <p className="text-2xl font-bold text-gray-600">06:00 - 08:00</p>
-                  <p className="text-xs text-muted-foreground mt-1">เมื่อความเข้มแสง {">"} 2000 Lux</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Last Update:</span>
+                  <span className="font-mono text-xs">
+                    {new Date(relayState.lastUpdate).toLocaleTimeString('th-TH')}
+                  </span>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Light Controls */}
-          <div>
-            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-              <Lightbulb className="h-6 w-6 text-yellow-500" />
-              ควบคุมไฟ (Lighting Control)
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {devices
-                .filter((d) => d.type === "light")
-                .map((device) => (
-                  <Card
-                    key={device.deviceId}
-                    className={`border-2 transition-all ${device.status === "on" ? "border-yellow-500 shadow-lg shadow-yellow-500/20" : "border-gray-300"}`}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <Lightbulb
-                            className={`h-5 w-5 ${device.status === "on" ? "text-yellow-500 animate-pulse" : "text-gray-400"}`}
-                          />
-                          {device.name}
-                        </CardTitle>
-                        <Badge variant={device.status === "on" ? "default" : "secondary"}>
-                          {device.status === "on" ? "ON" : "OFF"}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor={device.deviceId}>สถานะ</Label>
-                        <Switch
-                          id={device.deviceId}
-                          checked={device.status === "on"}
-                          onCheckedChange={() => toggleDevice(device.deviceId, device.status)}
-                        />
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        อัพเดทล่าสุด: {new Date(device.lastUpdate).toLocaleString("th-TH")}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-            </div>
-          </div>
-
-          {/* Advanced Controls */}
+          {/* Relay Controls */}
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Fan Control */}
-            <Card className="border-2 border-cyan-300 dark:border-cyan-700">
+            {/* Relay 1 */}
+            <Card className={`border-2 transition ${relayState.relay1 === 'on' ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white'}`}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Fan className={`h-5 w-5 text-cyan-600 ${fanSpeed > 0 ? "animate-spin" : ""}`} />
-                  ควบคุมพัดลม (Fan Control)
+                  <Power className={`h-5 w-5 ${relayState.relay1 === 'on' ? 'text-blue-600' : 'text-gray-400'}`} />
+                  Relay Channel 1
                 </CardTitle>
+                <CardDescription>GPIO 26 (IN1)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>ความเร็ว</Label>
-                    <Badge variant="secondary" className="text-lg px-3 py-1">
-                      {fanSpeed}%
+                {/* Status Display */}
+                <div className="flex items-center justify-center p-8 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg">
+                  <div className="text-center">
+                    <div className="text-6xl font-bold mb-3">
+                      <Power className={`h-16 w-16 mx-auto ${relayState.relay1 === 'on' ? 'text-blue-600' : 'text-gray-400'}`} />
+                    </div>
+                    <Badge
+                      className={`text-lg px-6 py-2 ${
+                        relayState.relay1 === 'on' ? 'bg-blue-600' : 'bg-gray-400'
+                      }`}
+                      variant="secondary"
+                    >
+                      {relayState.relay1.toUpperCase()}
                     </Badge>
                   </div>
-                  <Slider
-                    value={[fanSpeed]}
-                    onValueChange={(value) => setFanSpeed(value[0])}
-                    max={100}
-                    step={10}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>ปิด</span>
-                    <span>ช้า</span>
-                    <span>กลาง</span>
-                    <span>เร็ว</span>
-                    <span>เต็มที่</span>
-                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => setFanSpeed(0)} variant="outline" size="sm" className="flex-1">
-                    ปิด
-                  </Button>
-                  <Button onClick={() => setFanSpeed(50)} variant="outline" size="sm" className="flex-1">
-                    50%
-                  </Button>
-                  <Button onClick={() => setFanSpeed(100)} variant="default" size="sm" className="flex-1">
-                    100%
-                  </Button>
+
+                {/* Toggle Button */}
+                <Button
+                  onClick={() => toggleRelay('relay1')}
+                  disabled={loading || !connected}
+                  className={`w-full py-6 text-lg font-semibold ${
+                    relayState.relay1 === 'on'
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                  variant={relayState.relay1 === 'on' ? 'destructive' : 'default'}
+                >
+                  {loading ? 'Updating...' : relayState.relay1 === 'on' ? 'Turn OFF' : 'Turn ON'}
+                </Button>
+
+                {/* Switch Alternative */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <Label htmlFor="relay1-switch" className="font-medium">
+                    Quick Toggle
+                  </Label>
+                  <Switch
+                    id="relay1-switch"
+                    checked={relayState.relay1 === 'on'}
+                    onCheckedChange={() => toggleRelay('relay1')}
+                    disabled={loading || !connected}
+                  />
                 </div>
               </CardContent>
             </Card>
 
-            {/* Sprinkler Control */}
-            <Card className="border-2 border-blue-300 dark:border-blue-700">
+            {/* Relay 2 */}
+            <Card className={`border-2 transition ${relayState.relay2 === 'on' ? 'border-purple-500 bg-purple-50' : 'border-gray-300 bg-white'}`}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Droplets className="h-5 w-5 text-blue-600" />
-                  ควบคุมสปริงเกอร์ (Sprinkler Control)
+                  <Power className={`h-5 w-5 ${relayState.relay2 === 'on' ? 'text-purple-600' : 'text-gray-400'}`} />
+                  Relay Channel 2
                 </CardTitle>
+                <CardDescription>GPIO 27 (IN2)</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-base font-medium">สปริงเกอร์ 1</Label>
-                      <p className="text-sm text-muted-foreground">รดน้ำโซนหน้าสวน</p>
+              <CardContent className="space-y-6">
+                {/* Status Display */}
+                <div className="flex items-center justify-center p-8 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg">
+                  <div className="text-center">
+                    <div className="text-6xl font-bold mb-3">
+                      <Power className={`h-16 w-16 mx-auto ${relayState.relay2 === 'on' ? 'text-purple-600' : 'text-gray-400'}`} />
                     </div>
-                    <Switch />
+                    <Badge
+                      className={`text-lg px-6 py-2 ${
+                        relayState.relay2 === 'on' ? 'bg-purple-600' : 'bg-gray-400'
+                      }`}
+                      variant="secondary"
+                    >
+                      {relayState.relay2.toUpperCase()}
+                    </Badge>
                   </div>
                 </div>
 
-                <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-base font-medium">สปริงเกอร์ 2</Label>
-                      <p className="text-sm text-muted-foreground">รดน้ำโซนหลังสวน</p>
-                    </div>
-                    <Switch />
-                  </div>
-                </div>
-
-                <Button className="w-full bg-gradient-to-r from-blue-600 to-cyan-600">
-                  <Droplets className="h-4 w-4 mr-2" />
-                  เปิดทั้งหมด 10 นาที
+                {/* Toggle Button */}
+                <Button
+                  onClick={() => toggleRelay('relay2')}
+                  disabled={loading || !connected}
+                  className={`w-full py-6 text-lg font-semibold ${
+                    relayState.relay2 === 'on'
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                  variant={relayState.relay2 === 'on' ? 'destructive' : 'default'}
+                >
+                  {loading ? 'Updating...' : relayState.relay2 === 'on' ? 'Turn OFF' : 'Turn ON'}
                 </Button>
+
+                {/* Switch Alternative */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <Label htmlFor="relay2-switch" className="font-medium">
+                    Quick Toggle
+                  </Label>
+                  <Switch
+                    id="relay2-switch"
+                    checked={relayState.relay2 === 'on'}
+                    onCheckedChange={() => toggleRelay('relay2')}
+                    disabled={loading || !connected}
+                  />
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Info Card */}
-          <Card className="border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30">
+          {/* Information Card */}
+          <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="h-5 w-5 text-blue-600" />
-                เกี่ยวกับระบบควบคุม
-              </CardTitle>
+              <CardTitle>How It Works</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>• ควบคุมอุปกรณ์แบบเรียลไทม์ผ่าน AWS IoT Core</p>
-              <p>• รองรับโหมดอัตโนมัติตามเวลาและสภาพแวดล้อม</p>
-              <p>• บันทึกประวัติการทำงานของอุปกรณ์ทั้งหมด</p>
-              <p>• แจ้งเตือนผ่านอีเมลเมื่อมีการเปลี่ยนแปลงสถานะ</p>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <div className="flex gap-3">
+                <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <div>
+                  <strong>Step 1:</strong> Click "Turn ON/OFF" button or toggle the switch
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <div>
+                  <strong>Step 2:</strong> Backend API updates relay state
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <div>
+                  <strong>Step 3:</strong> ESP32 polls backend every 1 second
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <div>
+                  <strong>Step 4:</strong> ESP32 controls GPIO 26/27 → Relay triggers → Load turns ON/OFF
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

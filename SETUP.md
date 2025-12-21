@@ -109,7 +109,7 @@ heroku create iot-backend
 git push heroku main
 ```
 
-### 4. Railway.app
+### 4. DigitalOcean App Platform
 - Connect GitHub repo
 - Select `backend` directory
 - Deploy

@@ -16,7 +16,7 @@ COPY prisma.config.ts ./
 # Copy application code
 COPY server.js ./
 
-# Expose port (Railway will override this)
+# Expose port
 EXPOSE 5000
 
 # Start server
