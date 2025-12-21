@@ -1,6 +1,20 @@
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { LoginForm } from "@/components/login-form"
 
 export default function HomePage() {
+  const router = useRouter()
+
+  useEffect(() => {
+    // เช็คว่ามี token ไหม ถ้ามีให้ไป dashboard เลย
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      router.push('/dashboard')
+    }
+  }, [router])
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 p-4">
       <div className="w-full max-w-6xl grid md:grid-cols-2 gap-8 items-center">
