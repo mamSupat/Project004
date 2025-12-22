@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { getCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -23,9 +25,16 @@ export default function ControlPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [connected, setConnected] = useState(false)
+  const router = useRouter()
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
   useEffect(() => {
+    const user = getCurrentUser()
+    if (!user) {
+      router.push('/')
+      return
+    }
+
     fetchRelayState()
     // Poll relay state every 2 seconds
     const interval = setInterval(fetchRelayState, 2000)

@@ -9,26 +9,39 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useAuth } from "@/contexts/auth-context"
+import { authenticateUser, setCurrentUser } from "@/lib/auth"
 
 export function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const { login, loading } = useAuth()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setLoading(true)
 
     try {
-      await login(email, password)
-      
-      // ไปยังหน้า dashboard
-      router.push("/dashboard")
-    } catch (err: any) {
-      setError(err.message || "อีเมลหรือรหัสผ่านไม่ถูกต้อง")
+      const user = authenticateUser(email, password)
+
+      if (user) {
+        setCurrentUser(user)
+
+        // Redirect based on role
+        if (user.role === "admin") {
+          router.push("/admin")
+        } else {
+          router.push("/dashboard")
+        }
+      } else {
+        setError("อีเมลหรือรหัสผ่านไม่ถูกต้อง")
+      }
+    } catch (err) {
+      setError("เกิดข้อผิดพลาดในการเข้าสู่ระบบ")
+    } finally {
+      setLoading(false)
     }
   }
 

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useAuth } from "@/contexts/auth-context"
+import { registerUser, setCurrentUser } from "@/lib/auth"
 
 export function SignupForm() {
   const [name, setName] = useState("")
@@ -16,33 +16,38 @@ export function SignupForm() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const { register, loading } = useAuth()
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setLoading(true)
 
     try {
       // ตรวจสอบว่ารหัสผ่านตรงกันหรือไม่
       if (password !== confirmPassword) {
         setError("รหัสผ่านไม่ตรงกัน")
+        setLoading(false)
         return
       }
 
-      // ตรวจสอบความยาวรหัสผ่าน
-      if (password.length < 6) {
-        setError("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
-        return
-      }
+      // ลงทะเบียนผู้ใช้
+      const result = registerUser(email, password, name)
 
-      // ลงทะเบียนผู้ใช้ผ่าน AuthContext
-      await register(email, password, name)
-      
-      // ไปยังหน้า dashboard
-      router.push("/dashboard")
-    } catch (err: any) {
-      setError(err.message || "เกิดข้อผิดพลาดในการสมัครสมาชิก")
+      if (result.success && result.user) {
+        // บันทึกข้อมูลผู้ใช้และเข้าสู่ระบบทันที
+        setCurrentUser(result.user)
+
+        // ไปยังหน้า dashboard
+        router.push("/dashboard")
+      } else {
+        setError(result.message)
+      }
+    } catch (err) {
+      setError("เกิดข้อผิดพลาดในการสมัครสมาชิก")
+    } finally {
+      setLoading(false)
     }
   }
 

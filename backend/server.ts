@@ -7,6 +7,7 @@ import { PutCommand, QueryCommand, ScanCommand, GetCommand } from '@aws-sdk/lib-
 import { dynamoDb } from './aws/dynamodb.js';
 import { randomUUID } from 'crypto';
 import { hashPassword, verifyPassword, generateToken, authenticate, AuthRequest } from './middleware/auth.js';
+import { sendWelcomeEmail, logNotification } from './services/email.service.js';
 
 dotenv.config();
 
@@ -255,143 +256,6 @@ app.put('/api/relay/state', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[Relay API Error]', error);
     res.status(500).json({ success: false, error: 'Failed to update relay' });
-  }
-});
-
-// ==================== AUTH API ====================
-// POST: Register new user
-app.post('/api/auth/register', async (req: Request, res: Response) => {
-  try {
-    const { email, password, name } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false, error: 'email and password are required' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, error: 'password must be at least 6 characters' });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const userId = randomUUID();
-    const now = new Date().toISOString();
-    const passwordHash = await hashPassword(password);
-
-    // Check if email exists using GSI
-    const existing = await dynamoDb.send(new QueryCommand({
-      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
-      IndexName: 'EmailIndex',
-      KeyConditionExpression: 'email = :email',
-      ExpressionAttributeValues: { ':email': normalizedEmail },
-      Limit: 1,
-    }));
-
-    if (existing.Items && existing.Items.length > 0) {
-      return res.status(409).json({ success: false, error: 'Email already registered' });
-    }
-
-    await dynamoDb.send(new PutCommand({
-      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
-      Item: {
-        userId,
-        email: normalizedEmail,
-        passwordHash,
-        name: name || null,
-        createdAt: now,
-        updatedAt: now,
-      },
-    }));
-
-    const token = generateToken({ userId, email: normalizedEmail });
-
-    res.status(201).json({
-      success: true,
-      token,
-      user: { userId, email: normalizedEmail, name: name || null, createdAt: now },
-    });
-  } catch (error: any) {
-    console.error('[Auth API Error] register:', error);
-    res.status(500).json({ success: false, error: 'Failed to register user', message: error?.message });
-  }
-});
-
-// POST: Login
-app.post('/api/auth/login', async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false, error: 'email and password are required' });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-
-    // Query by email using GSI
-    const result = await dynamoDb.send(new QueryCommand({
-      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
-      IndexName: 'EmailIndex',
-      KeyConditionExpression: 'email = :email',
-      ExpressionAttributeValues: { ':email': normalizedEmail },
-      Limit: 1,
-    }));
-
-    if (!result.Items || result.Items.length === 0) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password' });
-    }
-
-    const user = result.Items[0];
-
-    if (!user.passwordHash) {
-      return res.status(401).json({ success: false, error: 'Account has no password set' });
-    }
-
-    const isValid = await verifyPassword(password, user.passwordHash);
-
-    if (!isValid) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password' });
-    }
-
-    const token = generateToken({ userId: user.userId, email: user.email });
-
-    res.json({
-      success: true,
-      token,
-      user: {
-        userId: user.userId,
-        email: user.email,
-        name: user.name || null,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error: any) {
-    console.error('[Auth API Error] login:', error);
-    res.status(500).json({ success: false, error: 'Failed to login', message: error?.message });
-  }
-});
-
-// GET: Get current user (protected)
-app.get('/api/auth/me', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-
-    const result = await dynamoDb.send(new GetCommand({
-      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
-      Key: { userId: req.user.userId },
-    }));
-
-    if (!result.Item) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    const user = result.Item;
-    delete user.passwordHash; // Don't send password hash
-
-    res.json({ success: true, user });
-  } catch (error: any) {
-    console.error('[Auth API Error] me:', error);
-    res.status(500).json({ success: false, error: 'Failed to get user', message: error?.message });
   }
 });
 
@@ -824,6 +688,179 @@ app.post('/api/device/create', async (req: Request, res: Response) => {
       error: 'Failed to create device',
       message: error.message,
     });
+  }
+});
+
+// ==================== Authentication Routes ====================
+
+// Register new user
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Check if user already exists
+    const checkParams = {
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      IndexName: 'EmailIndex',
+      KeyConditionExpression: 'email = :email',
+      ExpressionAttributeValues: {
+        ':email': email.toLowerCase().trim()
+      }
+    };
+
+    const existingUser = await dynamoDb.send(new QueryCommand(checkParams));
+    if (existingUser.Items && existingUser.Items.length > 0) {
+      return res.status(400).json({ error: 'User with this email already exists' });
+    }
+
+    // Hash password
+    const passwordHash = await hashPassword(password);
+    const userId = randomUUID();
+
+    // Create user in DynamoDB
+    const params = {
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      Item: {
+        userId,
+        email: email.toLowerCase().trim(),
+        name: name || '',
+        passwordHash,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    };
+
+    await dynamoDb.send(new PutCommand(params));
+
+    // Send welcome email notification (non-blocking)
+    sendWelcomeEmail({
+      email: email.toLowerCase().trim(),
+      name: name || 'ผู้ใช้งานใหม่',
+      userId
+    }).then((emailSent) => {
+      // Log notification to DynamoDB
+      logNotification(
+        dynamoDb,
+        userId,
+        email.toLowerCase().trim(),
+        'welcome',
+        emailSent ? 'sent' : 'failed',
+        emailSent ? 'Welcome email sent successfully' : 'Failed to send welcome email'
+      );
+    });
+
+    // Generate JWT token
+    const token = generateToken(userId, email);
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        userId,
+        email: email.toLowerCase().trim(),
+        name: name || '',
+        createdAt: params.Item.createdAt
+      },
+      message: 'สมัครสมาชิกสำเร็จ! กรุณาตรวจสอบอีเมลของคุณ'
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Failed to register user' });
+  }
+});
+
+// Login user
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Find user by email
+    const params = {
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      IndexName: 'EmailIndex',
+      KeyConditionExpression: 'email = :email',
+      ExpressionAttributeValues: {
+        ':email': email.toLowerCase().trim()
+      }
+    };
+
+    const result = await dynamoDb.send(new QueryCommand(params));
+
+    if (!result.Items || result.Items.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = result.Items[0];
+
+    // Verify password
+    const isValid = await verifyPassword(password, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user.userId, user.email);
+
+    // Log login notification
+    logNotification(
+      dynamoDb,
+      user.userId,
+      user.email,
+      'login',
+      'sent',
+      `User logged in successfully at ${new Date().toLocaleString('th-TH')}`
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        userId: user.userId,
+        email: user.email,
+        name: user.name || '',
+        createdAt: user.createdAt
+      },
+      message: 'เข้าสู่ระบบสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+// Get current user (protected route)
+app.get('/api/auth/me', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const params = {
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      Key: {
+        userId: req.user!.userId
+      }
+    };
+
+    const result = await dynamoDb.send(new GetCommand(params));
+
+    if (!result.Item) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { passwordHash, ...user } = result.Item;
+
+    res.json({
+      success: true,
+      user
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ error: 'Failed to get user' });
   }
 });
 

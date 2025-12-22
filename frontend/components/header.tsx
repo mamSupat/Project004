@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Bell, Search, User, LayoutDashboard, Thermometer, Clock, CloudSun, Radio, BookOpen } from "lucide-react"
+import { Bell, Search, User, LayoutDashboard, Thermometer, Clock, CloudSun, Radio, LogOut, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -14,11 +14,19 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { logout } from "@/lib/auth"
+import { useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/language-context"
 
 export function Header() {
+    const router = useRouter()
     const pathname = usePathname()
     const { t } = useLanguage()
+
+    const handleLogout = () => {
+        logout()
+        router.push("/")
+    }
 
     const routes = [
         {
@@ -103,6 +111,16 @@ export function Header() {
                         <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" />
                     </Button>
 
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleLogout}
+                        className="hidden md:flex gap-2 text-muted-foreground hover:text-destructive"
+                    >
+                        <LogOut className="h-4 w-4" />
+                        {t("logout")}
+                    </Button>
+
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="rounded-full bg-secondary">
@@ -117,6 +135,10 @@ export function Header() {
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                                 <Link href="/dashboard/settings" className="w-full cursor-pointer">{t("settings")}</Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                                {t("logout")}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
