@@ -3,22 +3,20 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install production deps deterministically when possible
 COPY package*.json ./
+RUN npm ci --omit=dev || npm install --omit=dev
 
-# Install dependencies (postinstall will run prisma generate)
-RUN npm install --omit=dev
-
-# Copy Prisma schema
-COPY prisma ./prisma/
-COPY prisma.config.ts ./
-
-# Copy application code
+# Copy app source (JS + supporting dirs)
 COPY server.js ./
+COPY services ./services
+COPY aws ./aws
+COPY config ./config
+COPY prisma ./prisma
 
-# Expose port
+# Runtime
+ENV NODE_ENV=production
+ENV PORT=5000
 EXPOSE 5000
 
-# Start server
-ENV NODE_ENV=production
 CMD ["node", "server.js"]
