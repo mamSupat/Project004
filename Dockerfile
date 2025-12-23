@@ -7,6 +7,9 @@ WORKDIR /app
 # Install pnpm
 RUN npm install -g pnpm
 
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Copy package files
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
@@ -16,7 +19,7 @@ RUN pnpm install --no-frozen-lockfile
 # Copy source code
 COPY frontend/. .
 
-# Build Next.js static export
+# Build Next.js static export (env will be embedded in the bundle)
 RUN pnpm run build
 
 # Production stage - Nginx for static hosting
