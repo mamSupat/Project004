@@ -108,6 +108,14 @@ curl http://localhost:5000/api/sensors
 3. Connect AWS Amplify
 4. Uses `amplify.yml` automatically
 
+### Frontend (Render Static Site)
+1) Build command: `bash render-build.sh`
+2) Publish directory: `build`
+3) Environment variable: `NEXT_PUBLIC_API_URL=https://<your-backend-host>` (point to the deployed backend service)
+4) Repo root: use project root (script handles `frontend` path)
+
+If you prefer a Docker web service instead of static hosting, use the root `Dockerfile` and pass build arg `NEXT_PUBLIC_API_URL` during build.
+
 ### Backend
 Choose one:
 - AWS Lambda
