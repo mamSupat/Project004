@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { authenticateUser, setCurrentUser } from "@/lib/auth"
+import { login, setCurrentUser } from "@/lib/auth"
 
 export function LoginForm() {
   const [email, setEmail] = useState("")
@@ -24,22 +24,20 @@ export function LoginForm() {
     setLoading(true)
 
     try {
-      const user = authenticateUser(email, password)
+      const result = await login(email, password)
 
-      if (user) {
-        setCurrentUser(user)
+      if (result?.user) {
+        setCurrentUser(result.user)
 
         // Redirect based on role
-        if (user.role === "admin") {
+        if (result.user.role === "admin") {
           router.push("/admin")
         } else {
           router.push("/dashboard")
         }
-      } else {
-        setError("อีเมลหรือรหัสผ่านไม่ถูกต้อง")
       }
-    } catch (err) {
-      setError("เกิดข้อผิดพลาดในการเข้าสู่ระบบ")
+    } catch (err: any) {
+      setError(err?.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ")
     } finally {
       setLoading(false)
     }

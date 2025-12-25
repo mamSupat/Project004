@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TemperatureChart } from "@/components/temperature-chart"
 import { Users, Activity, Lightbulb, Database } from "lucide-react"
@@ -17,13 +17,17 @@ export default function AdminPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user || user.role !== "admin") {
-      router.push("/")
-      return
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user || user.role !== "admin") {
+        router.push("/")
+        return
+      }
+
+      fetchStats()
     }
 
-    fetchStats()
+    verify()
   }, [router])
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"

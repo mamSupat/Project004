@@ -33,19 +33,14 @@ export function SignupForm() {
       }
 
       // ลงทะเบียนผู้ใช้
-      const result = registerUser(email, password, name)
+      const result = await registerUser(email, password, name)
 
-      if (result.success && result.user) {
-        // บันทึกข้อมูลผู้ใช้และเข้าสู่ระบบทันที
+      if (result.user) {
         setCurrentUser(result.user)
-
-        // ไปยังหน้า dashboard
         router.push("/dashboard")
-      } else {
-        setError(result.message)
       }
-    } catch (err) {
-      setError("เกิดข้อผิดพลาดในการสมัครสมาชิก")
+    } catch (err: any) {
+      setError(err?.message || "เกิดข้อผิดพลาดในการสมัครสมาชิก")
     } finally {
       setLoading(false)
     }

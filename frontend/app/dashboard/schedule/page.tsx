@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,11 +29,14 @@ export default function SchedulePage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user) {
-      router.push("/")
-      return
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user) {
+        router.push("/")
+      }
     }
+
+    verify()
   }, [router])
 
   const addSchedule = () => {

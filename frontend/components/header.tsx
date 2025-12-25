@@ -23,8 +23,8 @@ export function Header() {
     const pathname = usePathname()
     const { t } = useLanguage()
 
-    const handleLogout = () => {
-        logout()
+    const handleLogout = async () => {
+        await logout()
         router.push("/")
     }
 

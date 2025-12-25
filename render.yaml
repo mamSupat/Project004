@@ -1,0 +1,55 @@
+services:
+  # Backend API Service (ECS-like on Render)
+  - type: web
+    name: iot-backend
+    runtime: node
+    plan: starter  # standard ถ้าต้องพลัง
+    buildCommand: cd backend && npm install && npm run build
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        # Render จะ inject PORT อัตโนมัติ ใช้ 3000 เป็น fallback
+        # ไม่ต้องระบุ value ถ้า Render inject มาให้ หรือ:
+        value: 3000
+      # Database & Auth
+      - key: DYNAMODB_USERS_TABLE
+        value: Users
+      - key: DYNAMODB_DEVICE_STATUS_TABLE
+        value: DeviceStatus
+      - key: DYNAMODB_SENSOR_DATA_TABLE
+        value: SensorData
+      - key: AWS_REGION
+        value: ap-southeast-2
+      # JWT Secrets (ต้องเปลี่ยนเป็นค่าจริง อย่างเก็บไว้ git)
+      - key: JWT_SECRET
+        sync: false  # เก็บใน Render secrets แทน env vars
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      # CORS
+      - key: FRONTEND_ORIGIN
+        value: https://iot-frontend.onrender.com  # แก้เป็น domain จริง
+      # Email (optional)
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      # AWS credentials (ถ้ามี IAM user dedicated)
+      # แนะนำ: ใช้ IAM Role ของ Render ถ้ามีเลือก
+      # - key: AWS_ACCESS_KEY_ID
+      #   sync: false
+      # - key: AWS_SECRET_ACCESS_KEY
+      #   sync: false
+
+  # Frontend Service (Static)
+  - type: static_site
+    name: iot-frontend
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/out
+    routes:
+      - path: /api/*
+        destination: http://iot-backend:3000/api/$1  # Proxy to backend
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://iot-backend.onrender.com  # Backend URL (Render domain)

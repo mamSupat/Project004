@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { SensorData } from "@/types"
@@ -13,13 +13,17 @@ export default function HistoryPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user) {
-      router.push("/")
-      return
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user) {
+        router.push("/")
+        return
+      }
+
+      fetchHistory()
     }
 
-    fetchHistory()
+    verify()
   }, [router])
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"

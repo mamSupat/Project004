@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { LogOut, Menu, X, Book } from "lucide-react"
-import { getCurrentUser, logout } from "@/lib/auth"
+import { fetchCurrentUser, getCurrentUser, logout } from "@/lib/auth"
 import Link from "next/link"
 import type { User } from "@/types"
 
@@ -14,11 +14,20 @@ export function Navbar() {
   const router = useRouter()
 
   useEffect(() => {
-    setUser(getCurrentUser())
+    const loadUser = async () => {
+      const existing = getCurrentUser()
+      if (existing) {
+        setUser(existing)
+        return
+      }
+      const fresh = await fetchCurrentUser()
+      setUser(fresh)
+    }
+    loadUser()
   }, [])
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     router.push("/")
   }
 

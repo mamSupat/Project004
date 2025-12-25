@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,14 +57,22 @@ export default function SimulatorPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user) {
-      router.push("/")
-      return
+    let shouldCleanup = false
+
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user) {
+        router.push("/")
+        return
+      }
+
+      shouldCleanup = true
     }
 
+    verify()
+
     return () => {
-      simulator.stop()
+      if (shouldCleanup) simulator.stop()
     }
   }, [router, simulator])
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,13 +22,17 @@ export default function AdminSettingsPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user || user.role !== "admin") {
-      router.push("/")
-      return
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user || user.role !== "admin") {
+        router.push("/")
+        return
+      }
+
+      setEmail(user.email)
     }
 
-    setEmail(user.email)
+    verify()
   }, [router])
 
   const handleSave = async () => {

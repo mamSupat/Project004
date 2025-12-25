@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
+import { ensureCurrentUser } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -23,37 +23,45 @@ export default function AwsIoTPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = getCurrentUser()
-    if (!user) {
-      router.push("/")
-      return
+    let interval: NodeJS.Timeout | undefined
+
+    const verify = async () => {
+      const user = await ensureCurrentUser()
+      if (!user) {
+        router.push("/")
+        return
+      }
+
+      // Simulate AWS IoT connection
+      setTimeout(() => setIsConnected(true), 1000)
+
+      // Simulate temperature updates from ESP32
+      interval = setInterval(() => {
+        const newTemp = 25 + Math.random() * 10
+        setCurrentTemp(newTemp)
+
+        setTempHistory((prev) => {
+          const newData = [
+            ...prev,
+            {
+              temperature: newTemp,
+              timestamp: new Date().toLocaleTimeString("th-TH", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              }),
+            },
+          ]
+          return newData.slice(-20) // Keep last 20 readings
+        })
+      }, 3000)
     }
 
-    // Simulate AWS IoT connection
-    setTimeout(() => setIsConnected(true), 1000)
+    verify()
 
-    // Simulate temperature updates from ESP32
-    const interval = setInterval(() => {
-      const newTemp = 25 + Math.random() * 10
-      setCurrentTemp(newTemp)
-
-      setTempHistory((prev) => {
-        const newData = [
-          ...prev,
-          {
-            temperature: newTemp,
-            timestamp: new Date().toLocaleTimeString("th-TH", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            }),
-          },
-        ]
-        return newData.slice(-20) // Keep last 20 readings
-      })
-    }, 3000)
-
-    return () => clearInterval(interval)
+    return () => {
+      if (interval) clearInterval(interval)
+    }
   }, [router])
 
   const handleLightToggle = async (checked: boolean) => {

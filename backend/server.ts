@@ -1,12 +1,13 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import sensorService from './services/sensor.service.js';
 import deviceService from './services/device.service.js';
-import { PutCommand, QueryCommand, ScanCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, QueryCommand, ScanCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { dynamoDb } from './aws/dynamodb.js';
 import { randomUUID } from 'crypto';
-import { hashPassword, verifyPassword, generateToken, authenticate, AuthRequest } from './middleware/auth.js';
+import { hashPassword, verifyPassword, generateAccessToken, generateRefreshToken, authenticate, AuthRequest, verifyRefreshToken, ACCESS_TOKEN_TTL_MS, REFRESH_TOKEN_TTL_MS } from './middleware/auth.js';
 import { sendWelcomeEmail, logNotification } from './services/email.service.js';
 
 dotenv.config();
@@ -50,8 +51,42 @@ interface APIResponse<T> {
 const app: Express = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const isProduction = process.env.NODE_ENV === 'production';
+const accessTokenCookie = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: isProduction ? 'none' as const : 'lax' as const,
+  maxAge: ACCESS_TOKEN_TTL_MS,
+  path: '/',
+};
+
+const refreshTokenCookie = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: isProduction ? 'none' as const : 'lax' as const,
+  maxAge: REFRESH_TOKEN_TTL_MS,
+  path: '/',
+};
+
+const loginAttempts: Record<string, { count: number; firstAttempt: number }> = {};
+
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+app.use(cookieParser());
 app.use(express.json());
 
 // ==================== In-Memory Database ====================
@@ -127,6 +162,35 @@ const db: Database = {
   ],
   notifications: [],
 };
+
+function setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
+  res.cookie('accessToken', accessToken, accessTokenCookie);
+  res.cookie('refreshToken', refreshToken, refreshTokenCookie);
+}
+
+function clearAuthCookies(res: Response) {
+  res.clearCookie('accessToken', { path: '/' });
+  res.clearCookie('refreshToken', { path: '/' });
+}
+
+function incrementLoginAttempt(key: string) {
+  const now = Date.now();
+  const windowMs = 10 * 60 * 1000; // 10 minutes
+  const maxAttempts = 5;
+  const entry = loginAttempts[key];
+
+  if (!entry || now - entry.firstAttempt > windowMs) {
+    loginAttempts[key] = { count: 1, firstAttempt: now };
+    return { blocked: false };
+  }
+
+  loginAttempts[key].count += 1;
+  if (loginAttempts[key].count > maxAttempts) {
+    return { blocked: true };
+  }
+
+  return { blocked: false };
+}
 
 // ==================== API Routes ====================
 
@@ -702,16 +766,20 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
     // Check if user already exists
+    const normalizedEmail = email.toLowerCase().trim();
     const checkParams = {
       TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
       IndexName: 'EmailIndex',
       KeyConditionExpression: 'email = :email',
       ExpressionAttributeValues: {
-        ':email': email.toLowerCase().trim()
+        ':email': normalizedEmail
       }
     };
-
     const existingUser = await dynamoDb.send(new QueryCommand(checkParams));
     if (existingUser.Items && existingUser.Items.length > 0) {
       return res.status(400).json({ error: 'User with this email already exists' });
@@ -720,17 +788,28 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     // Hash password
     const passwordHash = await hashPassword(password);
     const userId = randomUUID();
+    const role = 'user';
+    const createdAt = new Date().toISOString();
+
+    // Generate and store refresh token hash (rotation on login/refresh)
+    const accessToken = generateAccessToken({ userId, email: normalizedEmail, role });
+    const refreshToken = generateRefreshToken({ userId, email: normalizedEmail, role });
+    const refreshTokenHash = await hashPassword(refreshToken);
+    const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString();
 
     // Create user in DynamoDB
     const params = {
       TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
       Item: {
         userId,
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         name: name || '',
+        role,
         passwordHash,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        refreshTokenHash,
+        refreshTokenExpiresAt,
+        createdAt,
+        updatedAt: createdAt
       }
     };
 
@@ -753,16 +832,16 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       );
     });
 
-    // Generate JWT token
-    const token = generateToken(userId, email);
+    setAuthCookies(res, accessToken, refreshToken);
 
     res.status(201).json({
       success: true,
-      token,
+      accessToken,
       user: {
         userId,
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         name: name || '',
+        role,
         createdAt: params.Item.createdAt
       },
       message: 'สมัครสมาชิกสำเร็จ! กรุณาตรวจสอบอีเมลของคุณ'
@@ -782,13 +861,20 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+    const rateKey = `${req.ip || 'unknown'}:${normalizedEmail}`;
+    const attempt = incrementLoginAttempt(rateKey);
+    if (attempt.blocked) {
+      return res.status(429).json({ error: 'Too many login attempts. Please wait a few minutes before trying again.' });
+    }
+
     // Find user by email
     const params = {
       TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
       IndexName: 'EmailIndex',
       KeyConditionExpression: 'email = :email',
       ExpressionAttributeValues: {
-        ':email': email.toLowerCase().trim()
+        ':email': normalizedEmail
       }
     };
 
@@ -806,26 +892,46 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Generate JWT token
-    const token = generateToken(user.userId, user.email);
+    const role = user.role || 'user';
+
+    // Rotate refresh token
+    const accessToken = generateAccessToken({ userId: user.userId, email: normalizedEmail, role });
+    const refreshToken = generateRefreshToken({ userId: user.userId, email: normalizedEmail, role });
+    const refreshTokenHash = await hashPassword(refreshToken);
+    const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString();
+
+    await dynamoDb.send(new UpdateCommand({
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      Key: { userId: user.userId },
+      UpdateExpression: 'SET refreshTokenHash = :hash, refreshTokenExpiresAt = :exp, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':hash': refreshTokenHash,
+        ':exp': refreshTokenExpiresAt,
+        ':updatedAt': new Date().toISOString(),
+      },
+    }));
 
     // Log login notification
     logNotification(
       dynamoDb,
       user.userId,
-      user.email,
+      normalizedEmail,
       'login',
       'sent',
       `User logged in successfully at ${new Date().toLocaleString('th-TH')}`
     );
 
+    setAuthCookies(res, accessToken, refreshToken);
+    loginAttempts[rateKey] = { count: 0, firstAttempt: Date.now() };
+
     res.json({
       success: true,
-      token,
+      accessToken,
       user: {
         userId: user.userId,
-        email: user.email,
+        email: normalizedEmail,
         name: user.name || '',
+        role,
         createdAt: user.createdAt
       },
       message: 'เข้าสู่ระบบสำเร็จ'
@@ -833,6 +939,106 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+// Refresh access token using refresh token rotation
+app.post('/api/auth/refresh', async (req: Request, res: Response) => {
+  try {
+    const incomingRefresh = (req as any).cookies?.refreshToken || req.body?.refreshToken || req.headers['x-refresh-token'];
+
+    if (!incomingRefresh || typeof incomingRefresh !== 'string') {
+      return res.status(401).json({ error: 'No refresh token provided' });
+    }
+
+    const decoded = verifyRefreshToken(incomingRefresh);
+    if (!decoded) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    const userResult = await dynamoDb.send(new GetCommand({
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      Key: { userId: decoded.userId },
+    }));
+
+    if (!userResult.Item) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.Item as any;
+    if (!user.refreshTokenHash || !user.refreshTokenExpiresAt) {
+      return res.status(401).json({ error: 'Refresh token revoked' });
+    }
+
+    if (new Date(user.refreshTokenExpiresAt).getTime() < Date.now()) {
+      return res.status(401).json({ error: 'Refresh token expired' });
+    }
+
+    const tokenMatch = await verifyPassword(incomingRefresh, user.refreshTokenHash);
+    if (!tokenMatch) {
+      return res.status(401).json({ error: 'Refresh token mismatch' });
+    }
+
+    const role = user.role || 'user';
+    const accessToken = generateAccessToken({ userId: user.userId, email: user.email, role });
+    const refreshToken = generateRefreshToken({ userId: user.userId, email: user.email, role });
+    const refreshTokenHash = await hashPassword(refreshToken);
+    const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString();
+
+    await dynamoDb.send(new UpdateCommand({
+      TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+      Key: { userId: user.userId },
+      UpdateExpression: 'SET refreshTokenHash = :hash, refreshTokenExpiresAt = :exp, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':hash': refreshTokenHash,
+        ':exp': refreshTokenExpiresAt,
+        ':updatedAt': new Date().toISOString(),
+      },
+    }));
+
+    setAuthCookies(res, accessToken, refreshToken);
+
+    res.json({
+      success: true,
+      accessToken,
+      user: {
+        userId: user.userId,
+        email: user.email,
+        role,
+        name: user.name || '',
+        createdAt: user.createdAt,
+      },
+      message: 'Token refreshed'
+    });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(500).json({ error: 'Failed to refresh token' });
+  }
+});
+
+// Logout and revoke refresh token
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  try {
+    const incomingRefresh = (req as any).cookies?.refreshToken || req.body?.refreshToken;
+    if (incomingRefresh && typeof incomingRefresh === 'string') {
+      const decoded = verifyRefreshToken(incomingRefresh);
+      if (decoded?.userId) {
+        await dynamoDb.send(new UpdateCommand({
+          TableName: process.env.DYNAMODB_USERS_TABLE || 'Users',
+          Key: { userId: decoded.userId },
+          UpdateExpression: 'SET updatedAt = :updatedAt REMOVE refreshTokenHash, refreshTokenExpiresAt',
+          ExpressionAttributeValues: {
+            ':updatedAt': new Date().toISOString(),
+          },
+        }).catch(() => undefined);
+      }
+    }
+
+    clearAuthCookies(res);
+    res.json({ success: true, message: 'Logged out' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ error: 'Failed to logout' });
   }
 });
 
@@ -852,7 +1058,7 @@ app.get('/api/auth/me', authenticate, async (req: AuthRequest, res: Response) =>
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const { passwordHash, ...user } = result.Item;
+    const { passwordHash, refreshTokenHash, refreshTokenExpiresAt, ...user } = result.Item as any;
 
     res.json({
       success: true,
