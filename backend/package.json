@@ -37,7 +37,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/cookie-parser": "^1.4.11",
+    "@types/cookie-parser": "^1.4.2",
     "@types/nodemailer": "^7.0.4"
   }
 }
