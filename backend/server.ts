@@ -83,13 +83,7 @@ const loginAttempts: Record<string, { count: number; firstAttempt: number }> = {
 
 // Middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error('Not allowed by CORS'));
-  },
+  origin: true, // ✅ Allow all origins temporarily for debugging/testing
   credentials: true,
 }));
 app.use(cookieParser());
