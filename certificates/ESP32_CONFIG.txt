@@ -1,0 +1,13 @@
+﻿// Copy this to ESP32 credentials.h
+
+#define AWS_IOT_ENDPOINT "a2zdea8txl0m71-ats.iot.ap-southeast-2.amazonaws.com"
+#define AWS_IOT_MQTT_PORT 8883
+
+#define THING_NAME "esp32-relay-01"
+#define AWS_REGION "ap-southeast-2"
+#define AWS_IOT_POLICY "wsn-iot-policy"
+
+// Certificate files to upload to SPIFFS:
+// - device.pem.crt
+// - private.pem.key
+// - AmazonRootCA1.pem

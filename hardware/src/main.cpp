@@ -46,6 +46,27 @@ PubSubClient client(espClient);
 unsigned long lastHeartbeat = 0;
 const unsigned long heartbeat_interval = 30000; // 30 seconds
 
+// Keep TLS material alive for the lifetime of the client
+String tls_cert_pem;
+String tls_key_pem;
+String tls_ca_pem;
+
+// Read entire file into a String (null-terminated when using c_str())
+String readFileToString(const char* path) {
+  File f = SPIFFS.open(path, "r");
+  if (!f) {
+    Serial.print("Failed to open file: ");
+    Serial.println(path);
+    return "";
+  }
+  String content;
+  while (f.available()) {
+    content += static_cast<char>(f.read());
+  }
+  f.close();
+  return content;
+}
+
 // ==================== Function Declarations ====================
 void setup_wifi();
 void load_certificates();
@@ -133,39 +154,30 @@ void setup_wifi() {
 // ==================== Load Certificates ====================
 void load_certificates() {
   Serial.println("\nLoading certificates from SPIFFS...");
-  
-  // Load client certificate
-  if (SPIFFS.exists("/esp32-relay-01-certificate.pem.crt")) {
-    File cert = SPIFFS.open("/esp32-relay-01-certificate.pem.crt");
-    String certContent = cert.readString();
-    espClient.setCertificate(certContent.c_str());
-    cert.close();
-    Serial.println("Client certificate loaded");
-  } else {
-    Serial.println("WARNING: Client certificate not found in SPIFFS");
+
+  tls_cert_pem = readFileToString("/device.pem.crt");
+  tls_key_pem  = readFileToString("/private.pem.key");
+  tls_ca_pem   = readFileToString("/AmazonRootCA1.pem");
+
+  Serial.print("Cert size: "); Serial.println(tls_cert_pem.length());
+  Serial.print("Key size : "); Serial.println(tls_key_pem.length());
+  Serial.print("CA size  : "); Serial.println(tls_ca_pem.length());
+
+  if (tls_cert_pem.length() == 0 || tls_key_pem.length() == 0 || tls_ca_pem.length() == 0) {
+    Serial.println("ERROR: Missing TLS material in SPIFFS");
+    return;
   }
-  
-  // Load private key
-  if (SPIFFS.exists("/esp32-relay-01-private.pem.key")) {
-    File key = SPIFFS.open("/esp32-relay-01-private.pem.key");
-    String keyContent = key.readString();
-    espClient.setPrivateKey(keyContent.c_str());
-    key.close();
-    Serial.println("Private key loaded");
-  } else {
-    Serial.println("WARNING: Private key not found in SPIFFS");
-  }
-  
-  // Load root CA
-  if (SPIFFS.exists("/AmazonRootCA1.pem")) {
-    File ca = SPIFFS.open("/AmazonRootCA1.pem");
-    String caContent = ca.readString();
-    espClient.setCACert(caContent.c_str());
-    ca.close();
-    Serial.println("Root CA loaded");
-  } else {
-    Serial.println("WARNING: Root CA not found in SPIFFS");
-  }
+
+  #if defined(WIFI_CLIENT_SECURE_HAS_SETBUFFERSIZES)
+    espClient.setBufferSizes(2048, 2048);
+  #else
+    Serial.println("NOTE: setBufferSizes not available on this core version");
+  #endif
+
+  espClient.setCACert(tls_ca_pem.c_str());
+  espClient.setCertificate(tls_cert_pem.c_str());
+  espClient.setPrivateKey(tls_key_pem.c_str());
+  Serial.println("TLS credentials loaded into WiFiClientSecure");
 }
 
 // ==================== MQTT Setup ====================
