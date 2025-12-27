@@ -68,3 +68,39 @@ export interface ActuatorState {
   fan: number // 0-100%
   sprinkler: "on" | "off"
 }
+
+// Threshold & Notification Types
+export interface SensorThreshold {
+  id?: string
+  deviceId: string
+  sensorType: "temperature" | "humidity" | "light" | "pm25" | "rain"
+  minValue?: number
+  maxValue?: number
+  enabled: boolean
+  notifyEmail?: boolean
+  notifyBrowser?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface NotificationAlert {
+  id: string
+  deviceId: string
+  sensorType: string
+  currentValue: number | null
+  thresholdValue: number | null
+  thresholdType?: "min" | "max" | null
+  message: string
+  severity: "info" | "warning" | "error" | "critical"
+  timestamp: string
+  read: boolean
+}
+
+export interface NotificationPreference {
+  userId: string
+  emailEnabled: boolean
+  browserEnabled: boolean
+  soundEnabled: boolean
+  quietHoursStart?: string
+  quietHoursEnd?: string
+}

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { LayoutDashboard, Radio, Settings, FileText, Cloud, Thermometer, Calendar, Book } from "lucide-react"
+import { LayoutDashboard, Radio, Settings, FileText, Cloud, Thermometer, Calendar, Book, Bell } from "lucide-react"
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
 
@@ -30,6 +30,12 @@ export function Sidebar({ className }: SidebarProps) {
             icon: Thermometer,
             href: "/dashboard/control",
             active: pathname === "/dashboard/control",
+        },
+        {
+            label: "Alerts",
+            icon: Bell,
+            href: "/dashboard/alerts",
+            active: pathname === "/dashboard/alerts",
         },
         {
             label: "Schedule",

@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { hashPassword, verifyPassword, generateAccessToken, generateRefreshToken, authenticate, AuthRequest, verifyRefreshToken, ACCESS_TOKEN_TTL_MS, REFRESH_TOKEN_TTL_MS } from './middleware/auth.js';
 import { sendWelcomeEmail, logNotification } from './services/email.service.js';
 import { IoTDataPlaneClient, PublishCommand } from '@aws-sdk/client-iot-data-plane';
+import { publishToTopic, updateThingShadow } from './services/iot.service.js';
 
 dotenv.config();
 
@@ -510,22 +511,42 @@ app.post('/api/sensors', (req: Request, res: Response) => {
 });
 
 // ==================== IoT PUBLISH API ====================
-app.post('/api/iot/publish', (req: Request, res: Response) => {
+app.post('/api/iot/publish', async (req: Request, res: Response) => {
   try {
-    const { topic, command } = req.body;
+    const { topic, payload } = req.body;
+    if (!topic) {
+      return res.status(400).json({ success: false, error: 'topic is required' });
+    }
 
-    console.log(`[AWS IoT Publish] Topic: ${topic}`, command);
+    await publishToTopic(topic, payload ?? {});
 
     res.json({
       success: true,
-      message: "Command sent to device",
+      message: 'Command sent to device',
       topic,
-      command,
+      payload,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to publish command" });
+    console.error('[API] IoT publish failed', error);
+    res.status(500).json({ success: false, error: 'Failed to publish command' });
+  }
+});
+
+// ==================== IoT SHADOW UPDATE API ====================
+app.post('/api/iot/shadow', async (req: Request, res: Response) => {
+  try {
+    const { thingName, desired } = req.body;
+    if (!thingName) {
+      return res.status(400).json({ success: false, error: 'thingName is required' });
+    }
+
+    const response = await updateThingShadow(thingName, desired ?? {});
+
+    res.json({ success: true, message: 'Shadow updated', thingName, desired, response });
+  } catch (error) {
+    console.error('[API] IoT shadow update failed', error);
+    res.status(500).json({ success: false, error: 'Failed to update shadow' });
   }
 });
 
@@ -631,6 +652,296 @@ app.post('/api/notifications/email', (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to send email" });
+  }
+});
+
+// ==================== THRESHOLDS API ====================
+import { thresholdService } from './services/threshold.service.js';
+import { deviceRegistrationService } from './services/device-registration.service.js';
+
+// สร้าง Threshold ใหม่
+app.post('/api/thresholds', async (req: Request, res: Response) => {
+  try {
+    const threshold = await thresholdService.createThreshold(req.body);
+    res.json({ success: true, data: threshold });
+  } catch (error) {
+    console.error('Error creating threshold:', error);
+    res.status(500).json({ success: false, error: 'Failed to create threshold' });
+  }
+});
+
+// ดึง Thresholds ของ Device
+app.get('/api/thresholds/device/:deviceId', async (req: Request, res: Response) => {
+  try {
+    const { deviceId } = req.params;
+    const thresholds = await thresholdService.getThresholdsByDevice(deviceId);
+    res.json({ success: true, data: thresholds });
+  } catch (error) {
+    console.error('Error fetching thresholds:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch thresholds' });
+  }
+});
+
+// ดึง Threshold ตาม ID
+app.get('/api/thresholds/:id', async (req: Request, res: Response) => {
+  try {
+    const threshold = await thresholdService.getThresholdById(req.params.id);
+    if (!threshold) {
+      return res.status(404).json({ success: false, error: 'Threshold not found' });
+    }
+    res.json({ success: true, data: threshold });
+  } catch (error) {
+    console.error('Error fetching threshold:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch threshold' });
+  }
+});
+
+// อัปเดต Threshold
+app.put('/api/thresholds/:id', async (req: Request, res: Response) => {
+  try {
+    const threshold = await thresholdService.updateThreshold(req.params.id, req.body);
+    res.json({ success: true, data: threshold });
+  } catch (error) {
+    console.error('Error updating threshold:', error);
+    res.status(500).json({ success: false, error: 'Failed to update threshold' });
+  }
+});
+
+// ลบ Threshold
+app.delete('/api/thresholds/:id', async (req: Request, res: Response) => {
+  try {
+    await thresholdService.deleteThreshold(req.params.id);
+    res.json({ success: true, message: 'Threshold deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting threshold:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete threshold' });
+  }
+});
+
+// ดึง Notifications ของ Device
+app.get('/api/alerts/device/:deviceId', async (req: Request, res: Response) => {
+  try {
+    const { deviceId } = req.params;
+    const { limit } = req.query;
+    const notifications = await thresholdService.getNotificationsByDevice(
+      deviceId, 
+      limit ? parseInt(limit as string) : 50
+    );
+    res.json({ success: true, data: notifications });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch notifications' });
+  }
+});
+
+// ดึง Notifications ที่ยังไม่ได้อ่าน
+app.get('/api/alerts/unread', async (req: Request, res: Response) => {
+  try {
+    const notifications = await thresholdService.getUnreadNotifications();
+    res.json({ success: true, data: notifications, count: notifications.length });
+  } catch (error) {
+    console.error('Error fetching unread notifications:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch notifications' });
+  }
+});
+
+// ทำเครื่องหมายว่าอ่านแล้ว
+app.put('/api/alerts/:id/read', async (req: Request, res: Response) => {
+  try {
+    await thresholdService.markNotificationAsRead(req.params.id);
+    res.json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({ success: false, error: 'Failed to update notification' });
+  }
+});
+
+// ลบ Notification
+app.delete('/api/alerts/:id', async (req: Request, res: Response) => {
+  try {
+    await thresholdService.deleteNotification(req.params.id);
+    res.json({ success: true, message: 'Notification deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete notification' });
+  }
+});
+
+// ==================== DEVICE REGISTRATION API ====================
+
+// ลงทะเบียนอุปกรณ์ใหม่
+app.post('/api/devices/register', async (req: Request, res: Response) => {
+  try {
+    const { macAddress, ipAddress, typeHint, firmwareVersion } = req.body;
+    
+    if (!macAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'macAddress is required'
+      });
+    }
+
+    const device = await deviceRegistrationService.registerDevice({
+      macAddress,
+      ipAddress: ipAddress || 'unknown',
+      typeHint: typeHint || 'sensor',
+      firmwareVersion: firmwareVersion || '1.0.0'
+    });
+
+    res.json({
+      success: true,
+      message: 'Device registered successfully',
+      data: device
+    });
+  } catch (error) {
+    console.error('Error registering device:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to register device'
+    });
+  }
+});
+
+// ดึงรายการอุปกรณ์ทั้งหมด
+app.get('/api/devices', async (req: Request, res: Response) => {
+  try {
+    const devices = await deviceRegistrationService.getAllDevices();
+    res.json({
+      success: true,
+      data: devices
+    });
+  } catch (error) {
+    console.error('Error fetching devices:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch devices'
+    });
+  }
+});
+
+// ดึงอุปกรณ์จาก ID
+app.get('/api/devices/:id', async (req: Request, res: Response) => {
+  try {
+    const device = await deviceRegistrationService.getDeviceById(req.params.id);
+    
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: device
+    });
+  } catch (error) {
+    console.error('Error fetching device:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch device'
+    });
+  }
+});
+
+// อัปเดตชื่ออุปกรณ์
+app.put('/api/devices/:id/name', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: 'name is required'
+      });
+    }
+
+    const device = await deviceRegistrationService.updateDeviceName(req.params.id, name);
+    
+    res.json({
+      success: true,
+      message: 'Device name updated successfully',
+      data: device
+    });
+  } catch (error) {
+    console.error('Error updating device name:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update device name'
+    });
+  }
+});
+
+// อัปเดตประเภทอุปกรณ์
+app.put('/api/devices/:id/type', async (req: Request, res: Response) => {
+  try {
+    const { deviceType } = req.body;
+    
+    if (!deviceType) {
+      return res.status(400).json({
+        success: false,
+        error: 'deviceType is required'
+      });
+    }
+
+    const device = await deviceRegistrationService.updateDeviceType(req.params.id, deviceType);
+    
+    res.json({
+      success: true,
+      message: 'Device type updated successfully',
+      data: device
+    });
+  } catch (error) {
+    console.error('Error updating device type:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update device type'
+    });
+  }
+});
+
+// อัปเดตสถานะอุปกรณ์
+app.put('/api/devices/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: 'status is required'
+      });
+    }
+
+    const device = await deviceRegistrationService.updateDeviceStatus(req.params.id, status);
+    
+    res.json({
+      success: true,
+      message: 'Device status updated successfully',
+      data: device
+    });
+  } catch (error) {
+    console.error('Error updating device status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update device status'
+    });
+  }
+});
+
+// ลบอุปกรณ์
+app.delete('/api/devices/:id', async (req: Request, res: Response) => {
+  try {
+    await deviceRegistrationService.deleteDevice(req.params.id);
+    res.json({
+      success: true,
+      message: 'Device deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting device:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete device'
+    });
   }
 });
 

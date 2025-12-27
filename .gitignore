@@ -16,6 +16,19 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/npm-debug.log
+frontend/.env.local
+
+# AWS Certificates - NEVER COMMIT PRIVATE KEYS
+certificates/*.key
+certificates/*-private*
+certificates/*.pem.key
+*.private.key
+*.pem.key
+
+# Hardware build artifacts
+hardware/.pio/
+hardware/src/*.d
+hardware/src/*.o
 
 # IDE
 .vscode/
