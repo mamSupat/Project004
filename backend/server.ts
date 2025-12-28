@@ -93,6 +93,32 @@ let mqttClient: mqtt.MqttClient | null = null;
 const fs = await import('fs');
 const path_module = await import('path');
 
+async function publishCommandToDevices(topic: string, message: Record<string, any>) {
+  const payload = JSON.stringify(message);
+  let delivered = false;
+
+  if (mqttClient && mqttClient.connected) {
+    await new Promise<void>((resolve, reject) => {
+      mqttClient!.publish(topic, payload, { qos: 0 }, (error) => {
+        if (error) return reject(error);
+        return resolve();
+      });
+    });
+    delivered = true;
+  }
+
+  if (iotClient) {
+    await iotClient.send(new PublishCommand({
+      topic,
+      payload: new TextEncoder().encode(payload),
+      qos: 0,
+    }));
+    delivered = true;
+  }
+
+  return delivered;
+}
+
 async function initializeMqttClient() {
   try {
     const endpoint = process.env.AWS_IOT_ENDPOINT;
@@ -118,10 +144,19 @@ async function initializeMqttClient() {
       clientId: `backend-server-${Date.now()}`,
       clean: false,
       keepalive: 60,
+      reconnectPeriod: 2000,
     });
 
     mqttClient.on('connect', () => {
       console.log('[MQTT] ✅ Connected to AWS IoT Core');
+    });
+
+    mqttClient.on('reconnect', () => {
+      console.log('[MQTT] Reconnecting to AWS IoT Core...');
+    });
+
+    mqttClient.on('offline', () => {
+      console.warn('[MQTT] Offline - will retry');
     });
 
     mqttClient.on('error', (error) => {
@@ -388,31 +423,13 @@ app.post('/api/test/mqtt-publish', async (req: Request, res: Response) => {
 
     console.log(`[Test] Publishing to topic: ${topic}`);
     console.log(`[Test] Message: ${JSON.stringify(message)}`);
-
-    // Prefer native MQTT client if connected; otherwise fall back to IoT Data Plane
-    if (mqttClient && mqttClient.connected) {
-      mqttClient.publish(topic, JSON.stringify(message), { qos: 0 }, (error) => {
-        if (error) {
-          console.error('[Test] MQTT publish error:', error);
-          return res.status(500).json({ error: error.message });
-        }
-        console.log(`[Test] ✅ MQTT Published successfully`);
-        return res.json({ success: true, via: 'mqtt', message: 'Published to AWS IoT via MQTT' });
-      });
-      return;
+    const delivered = await publishCommandToDevices(topic, message);
+    if (!delivered) {
+      return res.status(500).json({ error: 'No MQTT or IoT client available to publish' });
     }
 
-    if (!iotClient) {
-      return res.status(500).json({ error: 'No MQTT connection and IoT client not initialized' });
-    }
-
-    const result = await iotClient.send(new PublishCommand({
-      topic,
-      payload: new TextEncoder().encode(JSON.stringify(message)),
-      qos: 0,
-    }));
-    console.log(`[Test] ✅ IoT Data Plane Published successfully`);
-    return res.json({ success: true, via: 'iot-data-plane', message: 'Published to AWS IoT via Data Plane', result });
+    console.log(`[Test] ✅ Published via ${mqttClient?.connected ? 'mqtt (and IoT fallback)' : 'IoT Data Plane'}`);
+    return res.json({ success: true, message: 'Published to device(s)' });
   } catch (error: any) {
     console.error('[Test] Publish error:', error);
     res.status(500).json({ error: error.message });
@@ -434,75 +451,22 @@ app.put('/api/relay/state', async (req: Request, res: Response) => {
     relayState.lastUpdate = new Date().toISOString();
     console.log('[Relay Control]', relayState);
     
-    // Publish to AWS IoT MQTT Topics using MQTT Direct Connection
-    if (mqttClient && mqttClient.connected) {
-      const thingName = process.env.AWS_IOT_THING_NAME || 'esp32-relay-01';
-      const commandTopic = `${thingName}/command`;
-      
-      try {
-        // Publish Channel 1 control message if relay1 changed
-        if (relay1 !== undefined) {
-          const action = relayState.relay1 === 'on' ? 'on' : 'off';
-          const message1 = JSON.stringify({
-            action: action,
-            channel: 1,
-          });
-          mqttClient.publish(commandTopic, message1, { qos: 0 }, (error) => {
-            if (error) {
-              console.error(`[MQTT Publish Error] ${commandTopic}:`, error);
-            } else {
-              console.log(`[MQTT Published] ${commandTopic}: ${message1}`);
-            }
-          });
-        }
-        
-        // Publish Channel 2 control message if relay2 changed
-        if (relay2 !== undefined) {
-          const action = relayState.relay2 === 'on' ? 'on' : 'off';
-          const message2 = JSON.stringify({
-            action: action,
-            channel: 2,
-          });
-          mqttClient.publish(commandTopic, message2, { qos: 0 }, (error) => {
-            if (error) {
-              console.error(`[MQTT Publish Error] ${commandTopic}:`, error);
-            } else {
-              console.log(`[MQTT Published] ${commandTopic}: ${message2}`);
-            }
-          });
-        }
-      } catch (mqttError: any) {
-        console.error('[MQTT Publish Error]', mqttError);
+    const thingName = process.env.AWS_IOT_THING_NAME || 'esp32-relay-01';
+    const commandTopic = `${thingName}/command`;
+
+    try {
+      if (relay1 !== undefined) {
+        const action = relayState.relay1 === 'on' ? 'on' : 'off';
+        await publishCommandToDevices(commandTopic, { action, channel: 1 });
+        console.log(`[Published] ${commandTopic}: ${action} ch1`);
       }
-    } else if (iotClient) {
-      const thingName = process.env.AWS_IOT_THING_NAME || 'esp32-relay-01';
-      const commandTopic = `${thingName}/command`;
-      try {
-        if (relay1 !== undefined) {
-          const action = relayState.relay1 === 'on' ? 'on' : 'off';
-          const message1 = JSON.stringify({ action, channel: 1 });
-          await iotClient.send(new PublishCommand({
-            topic: commandTopic,
-            payload: new TextEncoder().encode(message1),
-            qos: 0,
-          }));
-          console.log(`[IoT Published] ${commandTopic}: ${message1}`);
-        }
-        if (relay2 !== undefined) {
-          const action = relayState.relay2 === 'on' ? 'on' : 'off';
-          const message2 = JSON.stringify({ action, channel: 2 });
-          await iotClient.send(new PublishCommand({
-            topic: commandTopic,
-            payload: new TextEncoder().encode(message2),
-            qos: 0,
-          }));
-          console.log(`[IoT Published] ${commandTopic}: ${message2}`);
-        }
-      } catch (iotError: any) {
-        console.error('[IoT Publish Error]', iotError);
+      if (relay2 !== undefined) {
+        const action = relayState.relay2 === 'on' ? 'on' : 'off';
+        await publishCommandToDevices(commandTopic, { action, channel: 2 });
+        console.log(`[Published] ${commandTopic}: ${action} ch2`);
       }
-    } else {
-      console.warn('[Publish] No MQTT or IoT client available - skipping publish');
+    } catch (publishError: any) {
+      console.error('[Publish Error]', publishError);
     }
     
     // บันทึกลง DynamoDB
