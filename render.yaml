@@ -4,11 +4,11 @@ services:
     name: iot-backend
     runtime: node
     plan: starter
-    # Build both frontend and backend
+    # Build frontend; install backend deps (run backend via tsx at start)
     buildCommand: |
       cd frontend && npm install --legacy-peer-deps && npm run build && \
-      cd ../backend && NODE_ENV=development npm install --legacy-peer-deps && npm run build
-    startCommand: cd backend && npm start
+      cd ../backend && npm install --legacy-peer-deps
+    startCommand: cd backend && npx tsx server.ts
     envVars:
       - key: NODE_ENV
         value: production
@@ -25,7 +25,14 @@ services:
       - key: DYNAMODB_NOTIFICATION_LOGS_TABLE
         value: NotificationLogs
       - key: AWS_REGION
-        value: ap-southeast-2
+        value: ap-southeast-1
+      # AWS IoT Core (used by backend to publish control messages)
+      - key: AWS_IOT_ENDPOINT
+        value: a2zdea8txl0m71-ats.iot.ap-southeast-1.amazonaws.com
+      - key: AWS_IOT_REGION
+        value: ap-southeast-1
+      - key: AWS_IOT_THING_NAME
+        value: esp32-relay-01
       # JWT Secrets (set in Render dashboard)
       - key: JWT_SECRET
         sync: false
