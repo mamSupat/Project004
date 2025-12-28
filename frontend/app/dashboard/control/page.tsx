@@ -16,6 +16,21 @@ interface RelayState {
   lastUpdate: string
 }
 
+function resolveApiUrl() {
+  // Prefer explicit env
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL
+  // If running in browser and served from Render frontend, try matching backend subdomain
+  if (typeof window !== 'undefined') {
+    const { origin, hostname, protocol } = window.location
+    if (hostname.includes('frontend.onrender.com')) {
+      return origin.replace('frontend', 'backend')
+    }
+    return origin // same-origin fallback (proxy/monolith)
+  }
+  // Local dev fallback
+  return 'http://localhost:5000'
+}
+
 export default function ControlPage() {
   const [relayState, setRelayState] = useState<RelayState>({
     relay1: 'off',
@@ -26,7 +41,7 @@ export default function ControlPage() {
   const [error, setError] = useState('')
   const [connected, setConnected] = useState(false)
   const router = useRouter()
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+  const API_URL = resolveApiUrl()
 
   useEffect(() => {
     let source: EventSource | null = null
