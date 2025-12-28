@@ -122,6 +122,7 @@ const char* thing_name = "esp32-relay-01";
 // ==================== Pin Configuration ====================
 const int RELAY_PIN_1 = 26;  // GPIO 26 (RN1)
 const int RELAY_PIN_2 = 27;  // GPIO 27 (RN2)
+const bool RELAY_ACTIVE_HIGH = false; // Set false for active-low relay modules
 
 // ==================== MQTT Topics ====================
 // Command / State topics ให้ตรงกับ backend (publish: <deviceId>/command, state: <deviceId>/state)
@@ -179,8 +180,10 @@ void setup() {
   // Initialize relay pins
   pinMode(RELAY_PIN_1, OUTPUT);
   pinMode(RELAY_PIN_2, OUTPUT);
-  digitalWrite(RELAY_PIN_1, LOW);
-  digitalWrite(RELAY_PIN_2, LOW);
+  // Initialize to OFF based on module polarity
+  int OFF_STATE = RELAY_ACTIVE_HIGH ? LOW : HIGH;
+  digitalWrite(RELAY_PIN_1, OFF_STATE);
+  digitalWrite(RELAY_PIN_2, OFF_STATE);
   Serial.println("Relay pins initialized (LOW = OFF)");
   
   // Initialize SPIFFS
@@ -459,18 +462,20 @@ void callback(char* topic, byte* payload, unsigned int length) {
 // ==================== Control Relay ====================
 void control_relay(int channel, int state) {
   int pin = (channel == 1) ? RELAY_PIN_1 : RELAY_PIN_2;
+  int ON_STATE = RELAY_ACTIVE_HIGH ? HIGH : LOW;
+  int OFF_STATE = RELAY_ACTIVE_HIGH ? LOW : HIGH;
   Serial.print("Controlling relay ");
   Serial.print(channel);
   Serial.print(" to state ");
   Serial.println(state);
   
   if (state == 1) {
-    digitalWrite(pin, HIGH);  // Turn ON
+    digitalWrite(pin, ON_STATE);  // Turn ON
     Serial.print("Relay ");
     Serial.print(channel);
     Serial.println(" ON");
   } else {
-    digitalWrite(pin, LOW);   // Turn OFF
+    digitalWrite(pin, OFF_STATE);   // Turn OFF
     Serial.print("Relay ");
     Serial.print(channel);
     Serial.println(" OFF");
@@ -482,8 +487,9 @@ void publish_status() {
   if (!client.connected()) return;
   
   // Get relay states
-  int ch1_state = digitalRead(RELAY_PIN_1);
-  int ch2_state = digitalRead(RELAY_PIN_2);
+  int ON_STATE = RELAY_ACTIVE_HIGH ? HIGH : LOW;
+  int ch1_state = (digitalRead(RELAY_PIN_1) == ON_STATE) ? 1 : 0;
+  int ch2_state = (digitalRead(RELAY_PIN_2) == ON_STATE) ? 1 : 0;
   
   // Create JSON payload
   StaticJsonDocument<256> doc;
